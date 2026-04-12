@@ -17,6 +17,7 @@ export default function Chat() {
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -80,6 +81,28 @@ export default function Chat() {
         msg.id === aiId ? { ...msg, streaming: false } : msg
       )
     );
+  };
+
+  const clearHistory = async () => {
+    if (streaming || clearing) return;
+    setClearing(true);
+    try {
+      const res = await fetch("/api/chat/history/clear", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        logout();
+        return;
+      }
+      setMessages([
+        { role: "ai", id: "welcome", text: WELCOME, streaming: false },
+      ]);
+    } catch {
+      console.error("Failed to clear history");
+    } finally {
+      setClearing(false);
+    }
   };
 
   const sendMessage = async (text) => {
@@ -177,6 +200,31 @@ export default function Chat() {
 
   return (
     <div className="chat-page">
+
+      <div className="chat-topbar">
+        <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>
+          {messages.filter(m => m.id !== "welcome").length > 0
+            ? `${messages.filter(m => m.role === "user").length} messages`
+            : "New conversation"}
+        </span>
+        <button
+          onClick={clearHistory}
+          disabled={streaming || clearing}
+          style={{
+            fontSize: "12px",
+            padding: "5px 14px",
+            borderRadius: "20px",
+            border: "1px solid var(--border-strong)",
+            background: "transparent",
+            color: clearing ? "var(--text-hint)" : "var(--text-muted)",
+            cursor: streaming || clearing ? "not-allowed" : "pointer",
+            transition: "all 0.15s",
+          }}
+        >
+          {clearing ? "Clearing…" : "Clear conversation"}
+        </button>
+      </div>
+
       <div className="chat-messages">
         {messages.map((m) => (
           <div

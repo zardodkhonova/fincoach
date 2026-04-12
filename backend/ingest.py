@@ -5,18 +5,15 @@ import numpy as np
 import pandas as pd
 from groq import Groq
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
-import faiss
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 load_dotenv()
 
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-model = SentenceTransformer("all-MiniLM-L6-v2")
+vectorizer = TfidfVectorizer(max_features=5000)
 
 USER_INDEXES = {}
 CURRENT_DF = None
-FAISS_INDEX = None
-CHUNK_TEXTS = []
 
 
 def detect_columns_with_ai(columns: list) -> dict:
@@ -130,8 +127,6 @@ def parse_csv(path, user_id=None):
     else:
         df["category"] = df["category"].fillna("Uncategorized")
 
-    # --- Smart expense detection ---
-    # Case 1: file has a Type column (e.g. "Expense" / "Income")
     if "Type" in df.columns:
         expense_mask = df["Type"].str.lower().str.contains(
             "expense|debit|withdraw|payment|charge", na=False
@@ -139,13 +134,9 @@ def parse_csv(path, user_id=None):
         if expense_mask.any():
             df = df[expense_mask].copy()
         df["amount"] = df["amount"].abs()
-
-    # Case 2: file uses negative numbers for expenses
     elif df["amount"].lt(0).any():
         df = df[df["amount"] < 0].copy()
         df["amount"] = df["amount"].abs()
-
-    # Case 3: all amounts are positive — treat everything as expenses
     else:
         df = df[df["amount"] > 0].copy()
         df["amount"] = df["amount"].abs()
@@ -211,7 +202,7 @@ def build_chunks(df: pd.DataFrame) -> list:
 
 
 def build_index(user_id=None):
-    global FAISS_INDEX, CHUNK_TEXTS
+    global vectorizer
 
     if user_id is not None:
         if user_id not in USER_INDEXES or "df" not in USER_INDEXES[user_id]:
@@ -225,19 +216,13 @@ def build_index(user_id=None):
     chunks = build_chunks(df)
     texts = [c["text"] for c in chunks]
 
-    vecs = model.encode(texts, show_progress_bar=False)
-    index = faiss.IndexFlatL2(vecs.shape[1])
-    index.add(np.array(vecs, dtype="float32"))
+    user_vectorizer = TfidfVectorizer(max_features=5000)
+    tfidf_matrix = user_vectorizer.fit_transform(texts)
 
     if user_id is not None:
-        USER_INDEXES[user_id]["index"]  = index
-        USER_INDEXES[user_id]["chunks"] = chunks
-        with open(f"index_{user_id}.pkl", "wb") as f:
-            pickle.dump({"index": index, "chunks": chunks}, f)
-    else:
-        FAISS_INDEX  = index
-        CHUNK_TEXTS  = texts
-        with open("index.pkl", "wb") as f:
-            pickle.dump({"index": index, "chunks": chunks}, f)
-
-    return index, chunks
+        USER_INDEXES[user_id]["chunks"]     = chunks
+        USER_INDEXES[user_id]["texts"]      = texts
+        USER_INDEXES[user_id]["vectorizer"] = user_vectorizer
+        USER_INDEXES[user_id]["matrix"]     = tfidf_matrix
+    
+    return chunks, tfidf_matrix

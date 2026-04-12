@@ -70,15 +70,14 @@ def _require_user_ingest_state(user_id: int) -> dict | None:
     if not state:
         return None
     df = state.get("df")
-    idx = state.get("index")
+    matrix = state.get("matrix")
     chunks = state.get("chunks") or []
-    if df is None or df.empty or idx is None or not chunks:
+    if df is None or df.empty or matrix is None or not chunks:
         return None
     return state
 
 
 def _ensure_month_col(df):
-    """Make sure df has a 'month' string column like '2026-01'."""
     if "month" not in df.columns:
         df["month"] = df["date"].dt.to_period("M").astype(str)
     return df
@@ -254,8 +253,6 @@ def api_upload():
         return _json_error("Failed to load parsed dataframe.", 500)
 
     df = _ensure_month_col(state["df"].copy())
-
-    # Save filename into state so summary can read it
     ingest.USER_INDEXES[user_id]["filename"] = safe_name
 
     row_count = int(len(df))
@@ -353,6 +350,15 @@ def api_chat_history():
         for m in items
     ]
     return jsonify({"messages": messages})
+
+
+@app.delete("/api/chat/history/clear")
+@jwt_required()
+def api_chat_history_clear():
+    user_id = int(get_jwt_identity())
+    ChatMessage.query.filter_by(user_id=user_id).delete()
+    db.session.commit()
+    return jsonify({"status": "cleared"})
 
 
 @app.post("/api/chat")
