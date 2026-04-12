@@ -32,52 +32,6 @@ An AI-powered personal finance web app that lets users upload their bank CSV fil
 
 ---
 
-## Project Structure
-
-inance-coach/
-├── backend/
-│   ├── app.py              # Flask API — all routes
-│   ├── ingest.py           # CSV parsing + FAISS index builder
-│   ├── retriever.py        # Vector similarity search
-│   ├── coach.py            # Groq LLM streaming responses
-│   ├── models.py           # SQLAlchemy models (User, UserFile, ChatMessage)
-│   ├── requirements.txt    # Python dependencies
-│   └── .env                # API keys — never commit this file
-└── frontend/
-├── src/
-│   ├── App.jsx              # Router + ProtectedRoute
-│   ├── main.jsx             # Entry point + AuthProvider
-│   ├── index.css            # Global styles + CSS variables
-│   ├── context/
-│   │   └── AuthContext.jsx  # Auth state, login, logout
-│   ├── components/
-│   │   ├── Sidebar.jsx
-│   │   └── Topbar.jsx
-│   └── pages/
-│       ├── Login.jsx
-│       ├── Register.jsx
-│       ├── Dashboard.jsx
-│       ├── Chat.jsx
-│       ├── Transactions.jsx
-│       └── Upload.jsx
-├── index.html
-├── package.json
-└── vite.config.js       # Proxies /api requests to Flask on port 5000
-
-
----
-
-## How the RAG Pipeline Works
-
-1. User uploads a bank CSV file
-2. App automatically detects column names — tries local matching first, then uses Groq AI as fallback for unknown formats
-3. Transactions are chunked into monthly category summaries and individual large transaction records
-4. Chunks are embedded using sentence-transformers and stored in a FAISS vector index per user
-5. When the user asks a question, the top 6 most semantically similar chunks are retrieved
-6. Retrieved context plus the question are sent to Groq LLM
-7. AI responds with specific amounts, dates, and merchants from the real data — no hallucinations
-
----
 
 ## Features
 
