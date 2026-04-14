@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 
+const API_URL = import.meta.env.VITE_API_URL;
+
 const BADGE_STYLES = {
   Shopping: { bg: "#ede9fe", text: "#5b21b6" },
   Food: { bg: "#dcfce7", text: "#15803d" },
@@ -14,11 +16,10 @@ const BADGE_STYLES = {
 function formatAmountCell(raw) {
   const v = Number(raw) || 0;
   const out = v > 0 ? -v : v;
+
   return out.toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
   });
 }
 
@@ -28,6 +29,7 @@ function badgeForCategory(name) {
 
 export default function Transactions() {
   const { token, logout } = useAuth();
+
   const [rows, setRows] = useState([]);
   const [categories, setCategories] = useState(["All"]);
   const [months, setMonths] = useState(["All"]);
@@ -38,23 +40,25 @@ export default function Transactions() {
 
   const loadMeta = useCallback(async () => {
     try {
-      const res = await fetch("/api/summary", {
+      const res = await fetch(`${API_URL}/api/summary`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+
       if (res.status === 401) {
         logout();
         return;
       }
+
       if (!res.ok) {
         setCategories(["All"]);
         setMonths(["All"]);
         return;
       }
+
       const data = await res.json();
-      const cats = ["All", ...(data.categories || [])];
-      const mos = ["All", ...(data.months || [])];
-      setCategories(cats);
-      setMonths(mos);
+
+      setCategories(["All", ...(data.categories || [])]);
+      setMonths(["All", ...(data.months || [])]);
     } catch {
       setCategories(["All"]);
       setMonths(["All"]);
@@ -64,23 +68,32 @@ export default function Transactions() {
   const loadRows = useCallback(async () => {
     setLoading(true);
     setError("");
+
     try {
       const params = new URLSearchParams();
       params.set("category", category);
       params.set("month", month);
-      const res = await fetch(`/api/transactions?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+
+      const res = await fetch(
+        `${API_URL}/api/transactions?${params.toString()}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
       if (res.status === 401) {
         logout();
         return;
       }
+
       const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
         setError(data.error || "Failed to load transactions.");
         setRows([]);
         return;
       }
+
       setRows(data.transactions || []);
     } catch {
       setError("Network error.");
@@ -114,6 +127,7 @@ export default function Transactions() {
             ))}
           </select>
         </label>
+
         <label>
           Month
           <select value={month} onChange={(e) => setMonth(e.target.value)}>
@@ -128,13 +142,13 @@ export default function Transactions() {
 
       <div className="tx-table-card">
         {loading ? (
-          <div className="tx-empty">Loading transactions…</div>
+          <div>Loading...</div>
         ) : error ? (
-          <div className="tx-empty">{error}</div>
+          <div>{error}</div>
         ) : rows.length === 0 ? (
-          <div className="tx-empty">No transactions match your filters</div>
+          <div>No transactions found</div>
         ) : (
-          <table className="tx-table">
+          <table>
             <thead>
               <tr>
                 <th>Date</th>
@@ -143,25 +157,30 @@ export default function Transactions() {
                 <th style={{ textAlign: "right" }}>Amount</th>
               </tr>
             </thead>
+
             <tbody>
               {rows.map((r, idx) => {
                 const b = badgeForCategory(r.category);
+
                 return (
                   <tr key={`${r.date}-${idx}`}>
-                    <td className="tx-date">{r.date}</td>
+                    <td>{r.date}</td>
                     <td>{r.description}</td>
                     <td>
                       <span
-                        className="tx-badge"
                         style={{
                           background: b.bg,
                           color: b.text,
+                          padding: "4px 8px",
+                          borderRadius: 6,
                         }}
                       >
                         {r.category}
                       </span>
                     </td>
-                    <td className="tx-amt">{formatAmountCell(r.amount)}</td>
+                    <td style={{ textAlign: "right" }}>
+                      {formatAmountCell(r.amount)}
+                    </td>
                   </tr>
                 );
               })}
