@@ -1,172 +1,147 @@
-# FinCoach — AI Personal Finance Coach
+# FinCoach - Personal Finance AI Coach
 
-An AI-powered personal finance web app that lets users upload their bank CSV files and chat with an AI coach that answers questions based on their real transaction data. Built with Flask, React, Groq LLM, and a RAG pipeline using FAISS vector search.
+Full-stack app with:
+- **Backend:** Flask + JWT auth + SQLite + FAISS + Groq RAG
+- **Frontend:** React (Vite) + plain CSS
 
----
+## Live Deployment
 
-## What it does
-
-- Upload any bank CSV file — automatically detects column formats from any bank in the world
-- Get an instant spending dashboard with category breakdown and monthly trends
-- Chat with an AI coach that gives specific answers grounded in your real transaction data
-- Every user gets a private account with persistent chat history and saved data
-- Supports Revolut, Italian banks, US banks, Kaggle datasets, and any CSV with date and amount columns
-
----
-
-
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Backend | Python 3.11, Flask, Flask-JWT-Extended, Flask-CORS |
-| Database | SQLite + SQLAlchemy |
-| AI / LLM | Groq API — llama-3.3-70b-versatile |
-| Embeddings | sentence-transformers (all-MiniLM-L6-v2) |
-| Vector Search | FAISS (faiss-cpu) |
-| Frontend | React 18 + Vite |
-| Styling | Plain CSS with CSS variables |
-| Auth | JWT tokens stored in localStorage |
-| CSV Parsing | Pandas |
-
----
-
+- Frontend (Vercel): `https://fincoach-neon.vercel.app/`
+- Backend (Railway): `https://fincoach-production-3573.up.railway.app/`
 
 ## Features
 
-- **User authentication** — register and login with email and password, JWT tokens with 7-day expiry
-- **Private data per user** — every user has their own FAISS index and database records, fully isolated
-- **Smart CSV detection** — two-step column detection handles any bank format automatically
-- **Spending dashboard** — total spent, biggest category, transaction count, savings potential, monthly trend bars
-- **AI chat with streaming** — responses stream token by token in real time
-- **Persistent chat history** — conversations are saved to the database and restored on next login
-- **Transaction table** — filterable by category and month, sorted by amount
-- **Drag and drop upload** — with success, error, and loading states
+- User authentication (register/login/me) with JWT
+- CSV upload and transaction parsing
+- Dashboard with category and monthly spending insights
+- Transactions table with month/category filtering
+- AI Coach chat with retrieval-augmented answers from your own data
+- Chat history per authenticated user
 
----
+## Local Development
 
-## Setup and Installation
-
-### Requirements
-
-- Python 3.10 or higher
-- Node.js 18 or higher
-- A free Groq API key from [console.groq.com](https://console.groq.com)
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/YOURUSERNAME/fincoach.git
-cd fincoach
-```
-
-### 2. Backend setup
+### 1) Backend
 
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
-Create a `.env` file inside the `backend/` folder:
+Create/update `backend/.env`:
 
+```env
+GROQ_API_KEY=your_groq_key_here
+JWT_SECRET_KEY=your_jwt_secret_here
+```
 
-GROQ_API_KEY=your_groq_api_key_here
-JWT_SECRET_KEY=any_long_random_string_minimum_32_characters
-
-Start the backend:
+Run backend:
 
 ```bash
 python app.py
 ```
 
-The API will run on `http://localhost:5000`
+Backend runs on `http://localhost:5000`.
 
-### 3. Frontend setup
-
-Open a second terminal:
+### 2) Frontend
 
 ```bash
 cd frontend
 npm install
+```
+
+Create `.env.local` in `frontend/`:
+
+```env
+VITE_API_URL=http://localhost:5000
+```
+
+Run frontend:
+
+```bash
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser.
+Frontend runs on `http://localhost:5173`.
 
-### 4. First use
+## Production Setup
 
-1. Go to `http://localhost:5173`
-2. Click "Sign up" and create an account
-3. Go to the Upload page and upload your bank CSV file
-4. Go to Dashboard to see your spending breakdown
-5. Go to AI Coach and start asking questions about your finances
+### Vercel (Frontend)
 
----
+Project settings:
+- Root Directory: `frontend`
+- Build Command: `npm run build`
+- Output Directory: `dist`
+
+Environment variable:
+- `VITE_API_URL=https://fincoach-production-3573.up.railway.app`
+
+Notes:
+- `frontend/vercel.json` handles SPA rewrites.
+- After env changes, redeploy frontend.
+
+### Railway (Backend)
+
+Set service variables:
+- `GROQ_API_KEY=<valid_groq_key>`
+- `JWT_SECRET_KEY=<strong_secret>`
+
+Important:
+- Updating local `backend/.env` does **not** update Railway.
+- After changing Railway variables, restart/redeploy service.
 
 ## API Endpoints
 
-| Method | Route | Auth Required | Description |
-|---|---|---|---|
-| POST | /api/auth/register | No | Create a new account |
-| POST | /api/auth/login | No | Login and get JWT token |
-| GET | /api/auth/me | Yes | Get current user info |
-| POST | /api/upload | Yes | Upload CSV and build FAISS index |
-| GET | /api/summary | Yes | Get dashboard statistics |
-| GET | /api/transactions | Yes | Get filtered transaction list |
-| POST | /api/chat | Yes | Send message, get streaming AI response |
-| GET | /api/chat/history | Yes | Get saved chat history |
+Public:
+- `POST /api/auth/register`
+- `POST /api/auth/login`
 
----
+Protected (JWT required):
+- `GET /api/auth/me`
+- `POST /api/upload`
+- `GET /api/summary`
+- `GET /api/transactions?category=All&month=All`
+- `GET /api/chat/history`
+- `POST /api/chat` (SSE streaming)
 
-## Database Models
+## Project Layout
 
-**User** — id, email, password_hash, name, plan (free/pro), created_at
+- `backend/app.py` - Flask app and API routes
+- `backend/models.py` - SQLAlchemy models (`User`, `UserFile`, `ChatMessage`)
+- `backend/ingest.py` - CSV parsing, chunking, embeddings, FAISS index
+- `backend/retriever.py` - similarity retrieval from FAISS
+- `backend/coach.py` - Groq streaming responses with RAG context
+- `frontend/src/context/AuthContext.jsx` - auth state + token persistence
+- `frontend/src/lib/api.js` - API base URL helper
+- `frontend/src/pages` - Dashboard, Chat, Transactions, Upload, Login, Register
 
-**UserFile** — id, user_id, filename, row_count, uploaded_at
+## Troubleshooting
 
-**ChatMessage** — id, user_id, role (user/assistant), content, created_at
+- **Chat shows `401 invalid_api_key`:**
+  Railway has invalid/missing `GROQ_API_KEY`. Update Railway variable and redeploy backend.
 
----
+- **Frontend looks outdated on Vercel:**
+  Ensure latest commit is deployed, correct branch selected, and redeploy with cleared cache.
 
-## Supported CSV Formats
+- **`ModuleNotFoundError: sentence_transformers` (local backend):**
+  Run `pip install -r backend/requirements.txt`.
 
-The app uses a two-step column detection system:
+- **Auth routes return 401 unexpectedly:**
+  Token may be expired/invalid. Sign out and sign in again.
 
-**Step 1 — Local matching:** checks for known column name variants from common banks (Date, Transaction Date, Started Date, Amount, Debit Amount, Description, Merchant Name, etc.)
+## Deploy Checklist
 
-**Step 2 — AI fallback:** if local matching fails, sends the column names to Groq LLM which maps them to the standard format automatically
+Before announcing a new release, verify all items:
 
-Tested with:
-- Revolut exports
-- Italian banks (Intesa Sanpaolo, UniCredit, Fineco)
-- US banks (Chase, Bank of America format)
-- Kaggle personal finance datasets
-- Any CSV containing date and amount columns
-
----
-
-## Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| GROQ_API_KEY | Yes | Your Groq API key from console.groq.com |
-| JWT_SECRET_KEY | Yes | Any random string, minimum 32 characters |
-
----
-
-## Roadmap
-
-- [ ] Stripe subscription billing (Free vs Pro plan)
-- [ ] Weekly AI-generated email reports
-- [ ] Anomaly detection and spending alerts
-- [ ] PDF export of monthly reports
-- [ ] Deploy to Railway + Vercel
-- [ ] Interactive charts with Recharts
-- [ ] Mobile app with React Native
-
----
-
-## License
-
-MIT License — free to use, modify, and distribute.
+1. Backend is healthy at Railway root URL.
+2. Railway variables are set: `GROQ_API_KEY`, `JWT_SECRET_KEY`.
+3. Frontend variable is set in Vercel: `VITE_API_URL`.
+4. Vercel project uses:
+   - Root Directory `frontend`
+   - Build Command `npm run build`
+   - Output Directory `dist`
+5. Latest branch/commit is deployed on Vercel.
+6. Frontend was redeployed after env var changes.
+7. Register/login works in production.
+8. CSV upload succeeds and dashboard metrics appear.
+9. Chat streams response without Groq key errors.
+10. Route refresh works (`/chat`, `/transactions`, `/upload`) without 404.
