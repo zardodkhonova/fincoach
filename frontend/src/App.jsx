@@ -15,6 +15,7 @@ import Transactions from "./pages/Transactions.jsx";
 import Upload from "./pages/Upload.jsx";
 import Login from "./pages/Login.jsx";
 import Register from "./pages/Register.jsx";
+import { apiUrl } from "./lib/api.js";
 
 const TITLES = {
   "/": "Dashboard",
@@ -53,7 +54,7 @@ function Layout() {
       return;
     }
     try {
-      const res = await fetch("/api/summary", {
+      const res = await fetch(apiUrl("/api/summary"), {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401) {

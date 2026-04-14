@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
-
-const API_URL = import.meta.env.VITE_API_URL;
+import { apiUrl } from "../lib/api.js";
 
 const WELCOME =
   "Hi — I'm your FinCoach assistant. Ask me anything about the transactions you uploaded. " +
@@ -15,42 +14,32 @@ const SUGGESTIONS = [
 
 export default function Chat() {
   const { token, logout } = useAuth();
-
   const [messages, setMessages] = useState([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [clearing, setClearing] = useState(false);
   const bottomRef = useRef(null);
 
-  // ---------------- LOAD HISTORY ----------------
   useEffect(() => {
     let cancelled = false;
-
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/api/chat/history`, {
+        const res = await fetch(apiUrl("/api/chat/history"), {
           headers: { Authorization: `Bearer ${token}` },
         });
-
         if (res.status === 401) {
           logout();
           return;
         }
-
         const data = await res.json().catch(() => ({}));
-
         if (cancelled) return;
-
         const raw = data.messages || [];
-
         const mapped = raw.map((m, i) => ({
           id: `hist-${i}-${m.created_at || ""}`,
           role: m.role === "assistant" ? "ai" : "user",
           text: m.content || "",
           streaming: false,
         }));
-
         if (mapped.length === 0) {
           setMessages([
             { role: "ai", id: "welcome", text: WELCOME, streaming: false },
@@ -68,45 +57,34 @@ export default function Chat() {
         if (!cancelled) setHistoryLoaded(true);
       }
     })();
-
     return () => {
       cancelled = true;
     };
   }, [token, logout]);
 
-  // ---------------- SCROLL ----------------
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    bottomRef.current &&
+      bottomRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, streaming]);
 
-  // ---------------- CLEAR ----------------
-  const clearHistory = async () => {
-    if (streaming || clearing) return;
-
-    setClearing(true);
-
-    try {
-      const res = await fetch(`${API_URL}/api/chat/history/clear`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (res.status === 401) {
-        logout();
-        return;
-      }
-
-      setMessages([
-        { role: "ai", id: "welcome", text: WELCOME, streaming: false },
-      ]);
-    } finally {
-      setClearing(false);
-    }
+  const appendToken = (aiId, delta) => {
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === aiId ? { ...msg, text: (msg.text || "") + delta } : msg
+      )
+    );
   };
 
-  // ---------------- SEND MESSAGE ----------------
+  const finalizeAi = (aiId) => {
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === aiId ? { ...msg, streaming: false } : msg
+      )
+    );
+  };
+
   const sendMessage = async (text) => {
-    const trimmed = text.trim();
+    const trimmed = (text || "").trim();
     if (!trimmed || streaming) return;
 
     const userMsg = { role: "user", id: `u-${Date.now()}`, text: trimmed };
@@ -118,7 +96,7 @@ export default function Chat() {
     setStreaming(true);
 
     try {
-      const res = await fetch(`${API_URL}/api/chat`, {
+      const res = await fetch(apiUrl("/api/chat"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -134,6 +112,9 @@ export default function Chat() {
       }
 
       if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        appendToken(aiId, err.error || "Request failed.");
+        finalizeAi(aiId);
         setStreaming(false);
         return;
       }
@@ -142,59 +123,41 @@ export default function Chat() {
       const decoder = new TextDecoder();
       let buffer = "";
 
-      const append = (delta) => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === aiId ? { ...m, text: m.text + delta } : m
-          )
-        );
-      };
-
-      const finalize = () => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === aiId ? { ...m, streaming: false } : m
-          )
-        );
-      };
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buffer += decoder.decode(value, { stream: true });
-
         const parts = buffer.split("\n\n");
         buffer = parts.pop() || "";
 
         for (const part of parts) {
           const line = part.trim();
           if (!line.startsWith("data:")) continue;
-
-          const jsonStr = line.replace("data:", "").trim();
-
+          const jsonStr = line.replace(/^data:\s*/, "");
           let payload;
           try {
             payload = JSON.parse(jsonStr);
           } catch {
             continue;
           }
-
-          if (payload.token) append(payload.token);
-          if (payload.done) finalize();
-          if (payload.error) append(payload.error);
+          if (payload.error) {
+            appendToken(aiId, payload.error);
+            continue;
+          }
+          if (payload.done) {
+            finalizeAi(aiId);
+            continue;
+          }
+          if (payload.token) {
+            appendToken(aiId, payload.token);
+          }
         }
       }
 
-      finalize();
+      finalizeAi(aiId);
     } catch {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === aiId
-            ? { ...m, text: "Network error", streaming: false }
-            : m
-        )
-      );
+      appendToken(aiId, "Network error while streaming the reply.");
+      finalizeAi(aiId);
     } finally {
       setStreaming(false);
     }
@@ -206,33 +169,68 @@ export default function Chat() {
   };
 
   if (!historyLoaded) {
-    return <div className="chat-loading-state">Loading…</div>;
+    return (
+      <div className="chat-page">
+        <div className="chat-loading-state">Loading conversation…</div>
+      </div>
+    );
   }
 
   return (
     <div className="chat-page">
       <div className="chat-messages">
         {messages.map((m) => (
-          <div key={m.id}>
-            <b>{m.role}</b>
-            <p>{m.text}</p>
+          <div
+            key={m.id}
+            className={
+              "chat-msg-block " +
+              (m.role === "user" ? "chat-msg-block--user" : "chat-msg-block--ai")
+            }
+          >
+            <div className="chat-msg-label">
+              {m.role === "user" ? "You" : "AI Coach"}
+            </div>
+            <div
+              className={
+                m.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"
+              }
+            >
+              {m.text}
+              {m.role === "ai" && m.streaming ? (
+                <span className="stream-cursor" aria-hidden />
+              ) : null}
+            </div>
           </div>
         ))}
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={onSubmit}>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={streaming}
-        />
-        <button disabled={streaming}>Send</button>
-      </form>
+      <div className="chat-chips">
+        {SUGGESTIONS.map((s) => (
+          <button
+            key={s}
+            type="button"
+            className="chat-chip"
+            disabled={streaming}
+            onClick={() => sendMessage(s)}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
 
-      <button onClick={clearHistory} disabled={clearing || streaming}>
-        Clear chat
-      </button>
+      <form className="chat-input-bar" onSubmit={onSubmit}>
+        <input
+          type="text"
+          placeholder="Ask about your spending…"
+          value={input}
+          disabled={streaming}
+          onChange={(e) => setInput(e.target.value)}
+        />
+        <button className="chat-send" type="submit" disabled={streaming}>
+          Send
+        </button>
+      </form>
     </div>
   );
 }
