@@ -73,17 +73,25 @@ function firstLetter(name) {
   return c ? c.toUpperCase() : "U";
 }
 
-export default function Sidebar() {
+export default function Sidebar({ open = false, onClose }) {
   const { user, logout } = useAuth();
   const displayName = user?.name || "User";
   const isPro = user?.plan === "pro";
 
   return (
-    <aside className="sidebar">
+    <aside className={"sidebar" + (open ? " sidebar--open" : "")}>
       <div className="sidebar-brand">
         <div className="sidebar-logo-row">
           <div className="sidebar-logo-mark" aria-hidden />
           <span className="sidebar-logo-text">FinCoach</span>
+          <button
+            type="button"
+            className="sidebar-close-btn"
+            aria-label="Close navigation menu"
+            onClick={onClose}
+          >
+            x
+          </button>
         </div>
         <span className="sidebar-beta">Beta</span>
       </div>
@@ -95,6 +103,7 @@ export default function Sidebar() {
             key={item.to}
             to={item.to}
             end={item.end}
+            onClick={onClose}
             className={({ isActive }) =>
               "sidebar-link" + (isActive ? " active" : "")
             }
@@ -122,7 +131,14 @@ export default function Sidebar() {
             </span>
           </div>
         </div>
-        <button type="button" className="sidebar-signout" onClick={logout}>
+        <button
+          type="button"
+          className="sidebar-signout"
+          onClick={() => {
+            if (onClose) onClose();
+            logout();
+          }}
+        >
           Sign out
         </button>
       </div>

@@ -1,55 +1,81 @@
+"""
+coach.py — RAG over retrieved chunks + Groq streaming completions.
+
+Loads GROQ_API_KEY via environment (set in .env and read by app.py / dotenv).
+"""
+
+from __future__ import annotations
+
 import os
-from groq import Groq
+from pathlib import Path
+from typing import Iterator
+
 from dotenv import load_dotenv
-import ingest
+from groq import Groq
 
-load_dotenv()
+import retriever
 
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+_ENV_PATH = Path(__file__).resolve().parent / ".env"
 
-SYSTEM = """You are a personal finance coach. 
-You will be given real transaction data from the user's bank account as context.
-Always base your answers strictly on the provided context data.
-Be specific — reference exact amounts, dates, and merchant names from the data.
-If the context contains relevant information, use it to give a detailed answer.
-Always end your response with one concrete saving tip based on the data."""
+GROQ_MODEL = "llama-3.3-70b-versatile"
+
+SYSTEM_PROMPT = """You are FinCoach, a personal finance assistant.
+
+Rules:
+- Answer using ONLY the transaction context provided in the user message. Do not invent merchants, dates, or amounts.
+- Be specific: cite dollar amounts and months/dates that appear in the context when relevant.
+- If the context is insufficient, say exactly what is missing instead of guessing.
+- End EVERY reply with a new line, then a line starting with "Saving tip:" followed by one concrete, actionable saving tip that fits the user's situation based on the data (not generic filler)."""
 
 
-def ask(question: str, user_id: int):
-    try:
-        from retriever import retrieve
-        context_chunks = retrieve(question, user_id, k=6)
-    except Exception as e:
-        context_chunks = []
-
-    if not context_chunks:
-        state = ingest.USER_INDEXES.get(int(user_id))
-        if state and state.get("chunks"):
-            context_chunks = [c["text"] for c in state["chunks"][:6]]
-
-    context = "\n".join(context_chunks) if context_chunks else "No transaction data available."
-
-    messages = [
-        {"role": "system", "content": SYSTEM},
-        {
-            "role": "user",
-            "content": (
-                f"Here is my transaction data:\n\n"
-                f"{context}\n\n"
-                f"Question: {question}"
-            ),
-        },
-    ]
-
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=messages,
-        temperature=0.3,
-        max_tokens=600,
-        stream=True,
+def _build_user_message(question: str, context_chunks: list[str]) -> str:
+    """Combine retrieved snippets and the user's question into one user turn."""
+    ctx = "\n".join(f"- {c}" for c in context_chunks) if context_chunks else "(no context retrieved)"
+    return (
+        "Transaction context (ground truth):\n"
+        f"{ctx}\n\n"
+        f"User question:\n{question.strip()}"
     )
 
-    for chunk in response:
-        token = chunk.choices[0].delta.content
-        if token:
-            yield token
+
+def ask(question: str, user_id: int) -> Iterator[str]:
+    """
+    Retrieve top-6 chunks for the user, call Groq with streaming enabled,
+    yield text deltas.
+    """
+    load_dotenv(_ENV_PATH)
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key or api_key == "your_key_here":
+        yield "Configuration error: set a valid GROQ_API_KEY in backend/.env."
+        return
+
+    chunks = retriever.retrieve(question, int(user_id), k=6)
+    user_content = _build_user_message(question, chunks)
+
+    try:
+        client = Groq(api_key=api_key)
+        stream = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=0.2,
+            max_tokens=1024,
+            stream=True,
+        )
+
+        for event in stream:
+            delta = event.choices[0].delta
+            if delta and delta.content:
+                yield delta.content
+    except Exception as e:
+        text = str(e)
+        lowered = text.lower()
+        if "invalid_api_key" in lowered or "invalid api key" in lowered:
+            yield (
+                "Configuration error: GROQ_API_KEY is invalid on the server. "
+                "Please update the key in deployment environment variables."
+            )
+            return
+        yield f"Sorry, the AI service returned an error: {text}"

@@ -1,25 +1,24 @@
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 import ingest
 
 
-def retrieve(query: str, user_id: int, k: int = 6) -> list:
+def retrieve(query: str, user_id: int, k: int = 6):
     state = ingest.USER_INDEXES.get(int(user_id))
     if not state:
-        return []
+        raise ValueError("No index found for this user.")
 
-    vectorizer = state.get("vectorizer")
-    matrix = state.get("matrix")
+    index = state.get("index")
     chunks = state.get("chunks")
 
-    if vectorizer is None or matrix is None or not chunks:
-        return []
+    if index is None or not chunks:
+        raise ValueError("Index not built yet for this user.")
 
-    try:
-        query_vec = vectorizer.transform([query])
-        scores = cosine_similarity(query_vec, matrix).flatten()
-        top_ids = np.argsort(scores)[::-1][:k]
-        results = [chunks[i]["text"] for i in top_ids]
-        return results
-    except Exception:
-        return [c["text"] for c in chunks[:k]]
+    q_vec = ingest.model.encode([query])
+    _, ids = index.search(np.array(q_vec, dtype="float32"), k)
+
+    results = []
+    for i in ids[0]:
+        if i >= 0 and i < len(chunks):
+            results.append(chunks[i]["text"])
+
+    return results

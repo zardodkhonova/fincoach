@@ -37,3 +37,7 @@ Thumbs.db
 # Miscellaneous
 *.sqlite
 *.db
+
+.env.production
+.env
+.env.*

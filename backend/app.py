@@ -22,55 +22,21 @@ from werkzeug.utils import secure_filename
 import coach
 from models import ChatMessage, User, UserFile, db
 
-# -------------------------------------------------------------------
-# Environment Setup
-# -------------------------------------------------------------------
 BACKEND_DIR = Path(__file__).resolve().parent
 load_dotenv(BACKEND_DIR / ".env")
 
 app = Flask(__name__)
-
-# Allow requests from Vercel frontend
-CORS(
-    app,
-    resources={r"/api/*": {"origins": "*"}},
-    supports_credentials=True,
-)
+CORS(app)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{BACKEND_DIR / 'finance_coach.db'}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["JWT_SECRET_KEY"] = os.environ.get(
-    "JWT_SECRET_KEY",
-    "fincoach_super_secret_key_2026_abc123xyz"
-)
+app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "fincoach_super_secret_key_2026_abc123xyz")
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=7)
 
 db.init_app(app)
 jwt = JWTManager(app)
 
-# -------------------------------------------------------------------
-# Health & Root Routes
-# -------------------------------------------------------------------
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({
-        "status": "success",
-        "message": "FinCoach backend is running",
-        "service": "fincoach-api"
-    })
 
-
-@app.route("/api/health", methods=["GET"])
-def health():
-    return jsonify({
-        "status": "healthy",
-        "message": "API is operational"
-    })
-
-
-# -------------------------------------------------------------------
-# JWT Error Handlers
-# -------------------------------------------------------------------
 @jwt.unauthorized_loader
 def jwt_unauthorized(reason):
     return jsonify({"error": reason or "Unauthorized"}), 401
@@ -86,9 +52,6 @@ def jwt_expired(jwt_header, jwt_payload):
     return jsonify({"error": "Token has expired"}), 401
 
 
-# -------------------------------------------------------------------
-# Utility Functions
-# -------------------------------------------------------------------
 def _json_error(message: str, status: int):
     return jsonify({"error": message}), status
 
@@ -107,14 +70,15 @@ def _require_user_ingest_state(user_id: int) -> dict | None:
     if not state:
         return None
     df = state.get("df")
-    matrix = state.get("matrix")
+    idx = state.get("index")
     chunks = state.get("chunks") or []
-    if df is None or df.empty or matrix is None or not chunks:
+    if df is None or df.empty or idx is None or not chunks:
         return None
     return state
 
 
 def _ensure_month_col(df):
+    """Make sure df has a 'month' string column like '2026-01'."""
     if "month" not in df.columns:
         df["month"] = df["date"].dt.to_period("M").astype(str)
     return df
@@ -177,9 +141,6 @@ def _compute_summary(user_id: int) -> dict | None:
     }
 
 
-# -------------------------------------------------------------------
-# Authentication Routes
-# -------------------------------------------------------------------
 @app.post("/api/auth/register")
 def api_register():
     if not request.is_json:
@@ -254,9 +215,6 @@ def api_me():
     return jsonify({"user": _user_data_dict(user)})
 
 
-# -------------------------------------------------------------------
-# File Upload
-# -------------------------------------------------------------------
 @app.post("/api/upload")
 @jwt_required()
 def api_upload():
@@ -296,6 +254,8 @@ def api_upload():
         return _json_error("Failed to load parsed dataframe.", 500)
 
     df = _ensure_month_col(state["df"].copy())
+
+    # Save filename into state so summary can read it
     ingest.USER_INDEXES[user_id]["filename"] = safe_name
 
     row_count = int(len(df))
@@ -318,20 +278,26 @@ def api_upload():
     })
 
 
-# -------------------------------------------------------------------
-# Financial Insights Routes
-# -------------------------------------------------------------------
 @app.get("/api/summary")
 @jwt_required()
 def api_summary():
     user_id = int(get_jwt_identity())
     if _require_user_ingest_state(user_id) is None:
-        return _json_error(
-            "No file uploaded yet. Please upload a CSV first.", 400
-        )
+        return _json_error("No file uploaded yet. Please upload a CSV first.", 400)
 
     payload = _compute_summary(user_id)
-    return jsonify(payload)
+    if payload is None:
+        return _json_error("No file uploaded yet. Please upload a CSV first.", 400)
+
+    return jsonify({
+        "filename": payload["filename"],
+        "total": payload["total"],
+        "transaction_count": payload["transaction_count"],
+        "by_category": payload["by_category"],
+        "by_month": payload["by_month"],
+        "biggest_transaction": payload["biggest_transaction"],
+        "savings_potential": payload["savings_potential"],
+    })
 
 
 @app.get("/api/transactions")
@@ -340,40 +306,33 @@ def api_transactions():
     user_id = int(get_jwt_identity())
     state = _require_user_ingest_state(user_id)
     if state is None:
-        return _json_error(
-            "No file uploaded yet. Please upload a CSV first.", 400
-        )
+        return _json_error("No file uploaded yet. Please upload a CSV first.", 400)
 
     df = _ensure_month_col(state["df"].copy())
+
     category = request.args.get("category", "All")
     month = request.args.get("month", "All")
 
     out = df.copy()
-    if category != "All":
+    if category and category != "All":
         out = out[out["category"] == category]
-    if month != "All":
+    if month and month != "All":
         out = out[out["month"] == month]
 
-    out = out.assign(_abs=out["amount"].abs()).sort_values(
-        "_abs", ascending=False
-    )
+    out = out.assign(_abs=out["amount"].abs()).sort_values("_abs", ascending=False)
 
-    rows = [
-        {
+    rows = []
+    for _, row in out.iterrows():
+        rows.append({
             "date": row["date"].strftime("%Y-%m-%d"),
             "description": str(row["description"]),
             "amount": float(row["amount"]),
             "category": str(row["category"]),
-        }
-        for _, row in out.iterrows()
-    ]
+        })
 
     return jsonify({"transactions": rows})
 
 
-# -------------------------------------------------------------------
-# Chat Routes
-# -------------------------------------------------------------------
 @app.get("/api/chat/history")
 @jwt_required()
 def api_chat_history():
@@ -396,31 +355,20 @@ def api_chat_history():
     return jsonify({"messages": messages})
 
 
-@app.delete("/api/chat/history/clear")
-@jwt_required()
-def api_chat_history_clear():
-    user_id = int(get_jwt_identity())
-    ChatMessage.query.filter_by(user_id=user_id).delete()
-    db.session.commit()
-    return jsonify({"status": "cleared"})
-
-
 @app.post("/api/chat")
 @jwt_required()
 def api_chat():
     user_id = int(get_jwt_identity())
 
     if _require_user_ingest_state(user_id) is None:
-        return _json_error(
-            "No file uploaded yet. Please upload a CSV first.", 400
-        )
+        return _json_error("No file uploaded yet. Please upload a CSV first.", 400)
 
     if not request.is_json:
         return _json_error("Expected application/json body.", 400)
 
     body = request.get_json(silent=True) or {}
     message = body.get("message")
-    if not message:
+    if not message or not str(message).strip():
         return _json_error("Missing non-empty 'message' field.", 400)
 
     text = str(message).strip()
@@ -436,40 +384,33 @@ def api_chat():
                 parts.append(token)
                 payload = json.dumps({"token": token}, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
-
             yield f"data: {json.dumps({'done': True})}\n\n"
-
+            full = "".join(parts)
             assistant_row = ChatMessage(
                 user_id=user_id,
                 role="assistant",
-                content="".join(parts),
+                content=full,
             )
             db.session.add(assistant_row)
             db.session.commit()
-
         except Exception as e:
             err = json.dumps({"error": str(e)}, ensure_ascii=False)
             yield f"data: {err}\n\n"
 
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    }
     return Response(
         event_stream(),
         mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers=headers,
     )
 
 
-# -------------------------------------------------------------------
-# Database Initialization
-# -------------------------------------------------------------------
 with app.app_context():
     db.create_all()
 
 
-# -------------------------------------------------------------------
-# Run Locally
-# -------------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)

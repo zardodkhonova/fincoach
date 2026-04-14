@@ -46,6 +46,7 @@ function Layout() {
   const location = useLocation();
   const title = TITLES[location.pathname] || "FinCoach";
   const [fileLabel, setFileLabel] = useState("No file loaded");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { token, logout } = useAuth();
 
   const refreshFileLabel = useCallback(async () => {
@@ -80,11 +81,27 @@ function Layout() {
     refreshFileLabel();
   }, [location.pathname, refreshFileLabel]);
 
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
   return (
-    <div className="app-shell">
-      <Sidebar />
+    <div className={"app-shell" + (mobileNavOpen ? " app-shell--nav-open" : "")}>
+      <Sidebar open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
+      {mobileNavOpen ? (
+        <button
+          type="button"
+          className="app-backdrop"
+          aria-label="Close navigation menu"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      ) : null}
       <div className="app-main">
-        <Topbar title={title} fileLabel={fileLabel} />
+        <Topbar
+          title={title}
+          fileLabel={fileLabel}
+          onMenuToggle={() => setMobileNavOpen((v) => !v)}
+        />
         <div className="app-content">
           <Outlet context={{ refreshFileLabel }} />
         </div>
